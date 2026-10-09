@@ -1,8 +1,12 @@
 # Tapastic-Comic-Downloader
-This is a downloader to download and update whole comics from https://tapas.io/. (Not official!)
+This is a downloader to download and update whole comics from https://tapas.io/. Although based on  is designed to emulate one person reading through a whole comic very quickly in order to avoid anti-spider 403 errors. This script was forked from the one by [@TilCreator] in response to the end-of-Tapas announcement.
+
+A viewing-server may be created in the future, and we are willing to work with the Archive Team.
 
 ## Attention:
 **This script could be illegal in certain cases, please first read the terms of service on https://tapas.io/ !**
+
+**This script is *not* backwards-compatible with the original version, as it uses a different naming scheme, and is in the process of being reworked!**
 
 ## Usage:
 1. Installing python3 and needed modules:
@@ -78,5 +82,6 @@ This is a downloader to download and update whole comics from https://tapas.io/.
    - Implemented pagination.
    - Interleaves downloading of images with downloading of pages, thereby emulating a human reader.
      (This reduces the chance of anti-scraping lockouts during url-gathering phase.)
+   - Reduces re-downloading of pages.
    - Records titles, author commentary, and author tags.
- * WARNING: this script is not backwards-compatible with the original version, as it uses a different naming schem!
+
