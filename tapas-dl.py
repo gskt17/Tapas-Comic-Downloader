@@ -1,4 +1,10 @@
 #!/bin/env python3
+import json
+import random
+import sys
+from time import sleep
+from urllib.parse import urlparse
+
 from pyquery import PyQuery as pq
 from pathlib import Path
 import os
@@ -57,11 +63,11 @@ parser.add_argument('-c', '--cookies', type=str, nargs='?', default="", dest='co
                     help='Optional cookies.txt file to load, can be used to allow the script to "log in" and circumvent age verification.')
 parser.add_argument('-o', '--output-dir', type=str, nargs='?', default="", dest='baseDir', metavar='PATH',
                     help='Output directory where comics should be placed.\nIf left blank, the script folder will be used.')
-
+parser.add_argument('-C', '--comics-only', action="store_true", help="Disable novel detection")
 args = parser.parse_args()
 
 s = requests.Session()
-s.headers.update({'user-agent': 'tapas-dl'})
+s.headers.update({'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'})
 if args.cookies:
     s.cookies = http.cookiejar.MozillaCookieJar()
     s.cookies.load(args.cookies, ignore_discard=True, ignore_expires=True)
@@ -83,13 +89,13 @@ for urlCount, url in enumerate(args.url):
     printLine('Loading ' + urlName + '...', True)
 
     # Get comic start page and test if comic exsists
-    pageReqest = s.get('https://tapas.io/series/' + urlName)
+    pageRequest = s.get('https://tapas.io/series/' + urlName)
 
-    if pageReqest.status_code != 200:
+    if pageRequest.status_code != 200:
         printLine('Error: Comic "{}" not found\n'.format(urlName))
         break
 
-    page = pq(pageReqest.text)
+    page = pq(pageRequest.text)
 
     name = page('.center-info__title.center-info__title--small').text()
 
@@ -102,12 +108,18 @@ for urlCount, url in enumerate(args.url):
     else:
         headerSrc = None
 
-    data = []
-    page = pq(s.get(f'https://tapas.io/series/{seriesId}/episodes?page=1&sort=OLDEST&max_limit=99999999')  # It's over 9000! But I love that they forgot to limit the max_limit, because that means I don't have to bother with pagination ^^
-              .json()['data']['body'])
-    for episode in page('[data-permalink*="/episode/"]'):
-        data.append({'id': int(episode.attrib['data-permalink'][episode.attrib['data-permalink'].rfind('/') + 1:])})
+    
 
+    data = []
+    page_no = 1
+    while True: 
+        page_data = s.get(f'https://tapas.io/series/{seriesId}/episodes?page={page_no}&sort=OLDEST').json()['data']# It is now no longer over 9000. Pagination is required.
+        page = pq(page_data['body'])
+        for episode in page('[data-permalink*="/episode/"]'):
+            data.append({'id': int(episode.attrib['data-permalink'][episode.attrib['data-permalink'].rfind('/') + 1:])})
+        if not page_data['pagination']['has_next']:
+            break
+        page_no = page_data['pagination']['page']
     printLine('{} [{}] ({} pages):'.format(name, urlName, len(data)))
 
     # Check if folder exsists, if not create it
@@ -117,34 +129,34 @@ for urlCount, url in enumerate(args.url):
     if (basePath != ""):
         savePath = os.path.join(basePath, savePath)
         printLine('Full path is: ' + str(savePath))
-    if os.path.isdir(savePath) and not args.force:
-        printLine('Found directory, only updating (use -f/--force to disable)')
+    # if os.path.isdir(savePath) and not args.force:
+    #     printLine('Found directory, only updating (use -f/--force to disable)')
 
-        filesInDir = list(os.scandir(savePath))
+    #     filesInDir = list(os.scandir(savePath))
 
-        fileNames = []
-        for fileInDir in filesInDir:
-            fileNames.append(fileInDir.name)
-        fileNames.sort()
+    #     fileNames = []
+    #     for fileInDir in filesInDir:
+    #         fileNames.append(fileInDir.name)
+    #     fileNames.sort()
 
-        imgOffset = len(fileNames)
+    #     imgOffset = len(fileNames)
 
-        if imgOffset > 1:
-            lastFile = fileNames[-1]
-            lastPageId = int(lastFile[lastFile.rindex('#') + 1:lastFile.rindex('.')])
+    #     if imgOffset > 1:
+    #         lastFile = fileNames[-1]
+    #         lastPageId = int(lastFile[lastFile.rindex('#') + 1:lastFile.rindex('.')])
 
-            pageOffset = next(i for i, page in enumerate(data) if page['id'] == lastPageId) + 1
+    #         pageOffset = next(i for i, page in enumerate(data) if page['id'] == lastPageId) + 1
 
-            data = data[pageOffset:]
-        else:
-            pageOffset = 0
-    else:
-        if not os.path.isdir(savePath):
-            os.mkdir(savePath)
-            printLine('Creating folder...', True)
+    #         data = data[pageOffset:]
+    #     else:
+    #         pageOffset = 0
+    # else:
+    if not os.path.isdir(savePath):
+        os.mkdir(savePath)
+        printLine('Creating folder...', True)
 
-        pageOffset = 0
-        imgOffset = 0
+    pageOffset = 0
+    imgOffset = 0
 
     # Download header
     if True not in [file.name.startswith('-1 - header.') for file in os.scandir(savePath)]:
@@ -163,57 +175,89 @@ for urlCount, url in enumerate(args.url):
         continue
 
     # Check if series is comic or novel
-    if len(pq(s.get(f'https://tapas.io/episode/{data[0]["id"]}').content)('.content__img.js-lazy')) > 0:
+    pageRequest = s.get(f'https://tapas.io/episode/{data[0]["id"]}')
+    if args.comics_only or len(pq(pageRequest.content)('.content__img.js-lazy')) > 0:
         printLine('Detected comic')
         # Get images from page from JS api
-        allImgCount = 0
+        allImgCount = imgCount = 0
+        
         for pageCount, pageData in enumerate(data):
-
+            pageDataFile = os.path.join(savePath, "{}.json".format(lead0(pageCount+pageOffset, len(data)+pageOffset)))
+            if Path(pageDataFile).exists() and not args.force and not pageCount == len(pageData) - 1:
+                continue
             # Test whether the page we have in mind is reachable
-            pageReqest = s.get(f'https://tapas.io/episode/{pageData["id"]}')
-            if pageReqest.status_code != 200:
+            if pageCount != 0: # Hack to ensure we look as much like a 
+                pageRequest = s.get(f'https://tapas.io/episode/{pageData["id"]}')
+            if pageRequest.status_code != 200:
                 # This page was unavailable. Let the user know and add a single dummy image entry.
                 # (We will check for this when we go to download images.)
-                printLine('Error: "{}" page {}/{} not found. Page Request yielded: {} (Early Access page?)'.format(urlName, pageCount + pageOffset, len(data) + pageOffset, str(pageReqest.status_code)), True)
-
+                printLine('Error: "{}" page {}/{} not found. Page Request yielded: {} (Early Access page?)'.format(urlName, pageCount + pageOffset, len(data) + pageOffset, str(pageRequest.status_code)), True)
                 pageData['title'] = "PageUnavailable"
                 pageData['imgs'] = []
                 pageData['imgs'].append("PageUnavailable")
 
+                pageHtml = None
+
+                if pageRequest.status_code == 403:
+                    print("Got 403, go pretend to be a human on the website (progress: {}/{} pages scraped)".format(pageCount + pageOffset, len(data) + pageOffset))
+                    sys.exit(-1)
+
             else:
                 # If the page did not yield an access error, go ahead an scrape for image entries.
-                pageHtml = pq(s.get(f'https://tapas.io/episode/{pageData["id"]}').content)
+                pageHtml = pq(pageRequest.content)
 
                 printLine('Downloaded image data from {} images (pages {}/{})...'.format(allImgCount, pageCount + pageOffset, len(data) + pageOffset), True)
 
-                pageData['title'] = pageHtml('.info__title').text()
+                pageData['title'] = pageHtml('[data-ep-title]').attr('data-ep-title')
 
                 pageData['imgs'] = []
                 for img in pageHtml('.content__img'):
                     pageData['imgs'].append(pq(img).attr('data-src'))
-
                     allImgCount += 1
-
-        # Download images
-        imgCount = 0
-        for pageCount, pageData in enumerate(data):
-
+                    # Get image data after loading images. Should look a bit more like a real browser this way.
             for imgOfPageCount, img in enumerate(pageData['imgs']):
 
                 # Check if the first image entry is the fummy text that indicates the page was unavailable when we tried to scrape it.
                 if pageData['imgs'][0] != "PageUnavailable":
                     # If the entry isn't a dummy entry, go ahead and download the images it contains.
-                    with open(os.path.join(savePath, check_path('{} - {} - {} - {} - #{}.{}'.format(lead0(imgCount + imgOffset, allImgCount + imgOffset), lead0(pageCount + pageOffset, len(pageData) + pageOffset),
-                                                                                                    lead0(imgOfPageCount, len(pageData['imgs'])), pageData['title'], pageData['id'], img[img.rindex('.') + 1:]),
-                                                                fat=args.restrict_characters)), 'wb') as f:
-                        f.write(s.get(img).content)
+                    res = urlparse(img)
 
+                    target_path = os.path.join(savePath,
+                            check_path('{} - {} - {} - #{}.{}'.format(
+                                lead0(pageCount + pageOffset, len(data) + pageOffset),
+                                pageData['title'],
+                                lead0(imgOfPageCount, len(pageData['imgs'])),
+                                pageData['id'], res.path[res.path.rindex('.')+1:]),
+                            fat=args.restrict_characters))
+                    if Path(target_path).exists():
+                        continue
+                    img_data = s.get(img).content # Load before creating the file.
+                    with open(target_path, 'wb') as f:
+                        f.write(img_data)
+                        if args.scroll:
+                            sleep(0.05 * random.lognormvariate(0, 0.5)) # scrolling + randomized delays
                     imgCount += 1
 
-                    printLine('Downloaded image {}/{} from page {}/{} ({}/{} images)...'.format(imgOfPageCount + 1, len(pageData['imgs']), pageCount + pageOffset, len(data) + pageOffset, imgCount + imgOffset, allImgCount + imgOffset), True)
+                    printLine('Downloaded image {}/{} from page {}/{}...'.format(imgOfPageCount + 1, len(pageData['imgs']), pageCount + pageOffset, len(data) + pageOffset, imgCount + imgOffset, allImgCount + imgOffset), True)
                 else:
                     # If the entry was a dummy entry, skip it and let the user know.
                     printLine('Error: No images downloaded from page {}/{}.'.format(pageCount + pageOffset, len(data) + pageOffset), True)
+            if pageHtml:
+                info = dict(
+                    title=pageData['title'],
+                    authorComment = str(pageHtml('.text.js-episode-story').html()),
+                    tags = str(pageHtml('div.tags').html()),
+                )
+
+                if not info['authorComment']:
+                    del info['authorComment']
+
+                with open(pageDataFile, 'w') as f:
+                    json.dump(info, f)
+                    
+
+
+
 
         if data != []:
             printLine('Downloaded {} of {} images'.format(imgCount, allImgCount))

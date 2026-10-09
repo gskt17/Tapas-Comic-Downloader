@@ -73,3 +73,10 @@ This is a downloader to download and update whole comics from https://tapas.io/.
  * To get the verbose output use `-v/--verbose`.
  * To specify an base output path use `-o/--output-dir \desired\path` (If not specified, files and folders will be created where the script was run.)
  * On some file systems (expecialy Windows ones) some characters are unsupportet, if you run into problems with that use the -c, --restrict-characters option
+
+ * Improvements over the original script:
+   - Implemented pagination.
+   - Interleaves downloading of images with downloading of pages, thereby emulating a human reader.
+     (This reduces the chance of anti-scraping lockouts during url-gathering phase.)
+   - Records titles, author commentary, and author tags.
+ * WARNING: this script is not backwards-compatible with the original version, as it uses a different naming schem!
